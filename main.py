@@ -7,25 +7,25 @@ from PyQt6.QtCore import QTimer, QDate
 from PyQt6.QtGui import QFont, QIcon
 from utils.funcoes import (
     aplicar_tema_escuro, carregar_grid, adicionar_registro,
-    iniciar_cronometro, parar_cronometro, atualizar_tempo, atualizar_registro, exportar_para_excel
+    iniciar_cronometro, parar_cronometro, atualizar_tempo, atualizar_registro, exportar_para_excel, exportar_para_pdf
 )
 
 class TimesheetApp(QWidget):
     def __init__(self):
         super().__init__()
 
-        # ✅ Definir Ícone do Aplicativo
+        # Definir Ícone do Aplicativo
         self.setWindowIcon(QIcon("assets/TS.ico"))  # Caminho para o ícone
 
         self.setWindowTitle("Timesheet Tracker - By: Luiz Lima")
-        self.setGeometry(200, 200, 800, 600)
+        self.setGeometry(200, 200, 900, 600)
 
         self.layout = QVBoxLayout()
 
-        # ✅ Aplicar Tema Escuro
+        # Aplicar Tema Escuro
         aplicar_tema_escuro(app)
 
-        # ✅ Cronômetro (Fonte maior e em negrito)
+        # Cronômetro (Fonte maior e em negrito)
         self.timer_label = QLabel("Tempo: 00:00:00")
         self.timer_label.setFont(QFont("Arial", 18, QFont.Weight.Bold))
         self.layout.addWidget(self.timer_label)
@@ -44,23 +44,27 @@ class TimesheetApp(QWidget):
         self.elapsed_time = 0
         self.running = False
 
-        # ✅ Tempo Total Trabalhado do Dia Filtrado
+        # Tempo Total Trabalhado do Dia Filtrado
         self.total_trabalho_label = QLabel("Total Trabalhado: 00h 00m")
         self.total_trabalho_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         self.layout.addWidget(self.total_trabalho_label)
 
-        # ✅ Seletor de Data com Calendário
+        # Seletor de Data com Calendário
         self.data_filtro = QDateEdit()
         self.data_filtro.setCalendarPopup(True)
         self.data_filtro.setDate(QDate.currentDate())
         self.data_filtro.dateChanged.connect(lambda: carregar_grid(self))
         self.layout.addWidget(self.data_filtro)
 
-        # ✅ Grid de Registros
+        # Grid de Registros
         self.grid = QTableWidget()
         self.grid.setColumnCount(5)
         self.grid.setHorizontalHeaderLabels(["Hora Inicial", "Hora Final", "Duração", "Atividade", "Ações"])
         self.grid.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        
+        # Ativa ordenação das colunas        
+        self.grid.setSortingEnabled(True)
+
         
         # Definindo tamanho das colunas 
         self.grid.setColumnWidth(0, 70)     # Hora Inicial
@@ -68,11 +72,12 @@ class TimesheetApp(QWidget):
         self.grid.setColumnWidth(2, 100)    # Duracao
         self.grid.setColumnWidth(3, 420)    # Atividade
         self.grid.setColumnWidth(4, 100)    # Acoes
+        self.grid.setColumnWidth(5, 50)     # Checkbox 
         
         self.grid.itemChanged.connect(lambda item: atualizar_registro(self, item.row(), item.column()))  # 🔹 Monitorar edições    
         self.layout.addWidget(self.grid)
 
-        # ✅ Formulário para Adicionar Registros Manualmente
+        # Formulário para Adicionar Registros Manualmente
         form_layout = QHBoxLayout()
 
         self.hora_inicio_input = QTimeEdit()
@@ -93,12 +98,17 @@ class TimesheetApp(QWidget):
         form_layout.addWidget(self.add_button)
 
         self.layout.addLayout(form_layout)
+        
+        
+        # Label para status da exportação
+        self.status_label = QLabel("")
+        self.layout.addWidget(self.status_label)
 
         carregar_grid(self)  # 🔹 Carregar registros ao iniciar a aplicação
 
-        # 🔽🔽🔽 NOVO RECURSO: EXPORTAR PARA EXCEL 🔽🔽🔽
+        # NOVO RECURSO: EXPORTAR PARA EXCEL
 
-        # ✅ Layout para os campos de data
+        # Layout para os campos de data
         export_layout = QHBoxLayout()
         self.data_de_filtro = QDateEdit()
         self.data_de_filtro.setCalendarPopup(True)
@@ -114,14 +124,16 @@ class TimesheetApp(QWidget):
 
         self.layout.addLayout(export_layout)  # 🔹 Adiciona os filtros abaixo da GRID
 
-        # ✅ Botão para exportar para Excel
+        # Botão para exportar para Excel
         self.export_button = QPushButton("📤 Exportar para Excel")
         self.export_button.clicked.connect(lambda: exportar_para_excel(self))
         self.layout.addWidget(self.export_button)
+        
+        # Botão para exportar para PDF
+        self.pdf_button = QPushButton("📄 Exportar para PDF")
+        self.pdf_button.clicked.connect(lambda: exportar_para_pdf(self))
+        self.layout.addWidget(self.pdf_button)
 
-        # ✅ Label para status da exportação
-        self.status_label = QLabel("")
-        self.layout.addWidget(self.status_label)
 
         self.setLayout(self.layout)
 

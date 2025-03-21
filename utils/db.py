@@ -17,7 +17,8 @@ def criar_tabela():
             dia TEXT NOT NULL,
             hora_inicio TEXT NOT NULL,
             hora_fim TEXT NOT NULL,
-            atividade TEXT NOT NULL
+            atividade TEXT NOT NULL,
+            lancado INTEGER DEFAULT 0
         )
     ''')
     conn.commit()
@@ -36,14 +37,22 @@ def inserir_registro(hora_inicio, hora_fim, atividade, dia=None):
     conn.commit()
     conn.close()
 
-# 🔹 Listar registros (com filtro opcional por dia)
 def listar_registros(dia=None):
     conn = conectar()
     cursor = conn.cursor()
     if dia:
-        cursor.execute("SELECT id, dia, hora_inicio, hora_fim, atividade FROM registros WHERE dia = ? ORDER BY hora_inicio", (dia,))
+        cursor.execute("""
+            SELECT id, dia, hora_inicio, hora_fim, atividade, lancado
+            FROM registros
+            WHERE dia = ?
+            ORDER BY hora_inicio
+        """, (dia,))
     else:
-        cursor.execute("SELECT id, dia, hora_inicio, hora_fim, atividade FROM registros ORDER BY hora_inicio")
+        cursor.execute("""
+            SELECT id, dia, hora_inicio, hora_fim, atividade, lancado
+            FROM registros
+            ORDER BY hora_inicio
+        """)
     
     registros = cursor.fetchall()
     conn.close()
@@ -87,7 +96,7 @@ def listar_registros_intervalo(data_de, data_ate):
     cursor = conexao.cursor()
 
     query = """
-    SELECT id, dia, hora_inicio, hora_fim, atividade 
+    SELECT id, dia, hora_inicio, hora_fim, atividade, lancado
     FROM registros 
     WHERE dia BETWEEN ? AND ?
     ORDER BY dia, hora_inicio
@@ -100,5 +109,6 @@ def listar_registros_intervalo(data_de, data_ate):
     return registros
 
 
-# 🔹 Criar a tabela ao iniciar
+# Criar a tabela ao iniciar
 criar_tabela()
+

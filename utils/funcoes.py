@@ -1,11 +1,19 @@
 from datetime import datetime
 from PyQt6.QtGui import QPalette, QColor
-from PyQt6.QtWidgets import QPushButton, QTableWidgetItem, QFileDialog
+from PyQt6.QtWidgets import QPushButton, QTableWidgetItem, QFileDialog, QCheckBox, QWidget, QHBoxLayout
 import time
-from PyQt6.QtCore import QTime
-from utils.db import inserir_registro, excluir_registro as excluir_do_banco, listar_registros, atualizar_registro_no_bd, listar_registros_intervalo # 🔹 Correção na importação
+from PyQt6.QtCore import QTime, Qt
+from utils.db import inserir_registro, excluir_registro as excluir_do_banco, listar_registros, atualizar_registro_no_bd, listar_registros_intervalo 
 import pandas as pd
-
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import Paragraph, Table, TableStyle, SimpleDocTemplate, Spacer
+from reportlab.lib.units import cm
+import os
+import platform
+import subprocess
+from PyQt6 import QtGui
 
 def aplicar_tema_escuro(app):
     """Aplica um tema escuro minimalista usando Fusion."""
@@ -29,7 +37,7 @@ def calcular_tempo_total(registros):
     total_segundos = 0
     formato = "%H:%M"
 
-    for _, _, hora_inicio, hora_fim, _ in registros:
+    for _, _, hora_inicio, hora_fim, _, _ in registros:
         try:
             inicio = datetime.strptime(hora_inicio, formato)
             fim = datetime.strptime(hora_fim, formato)
@@ -55,25 +63,62 @@ def calcular_duracao(hora_inicio, hora_fim):
         return "Erro"
 
 def carregar_grid(window):
-    """Carrega os registros na grid e exibe o tempo total trabalhado."""
     dia_filtro = window.data_filtro.date().toString("dd/MM/yy")
     registros = listar_registros(dia_filtro)
 
-    window.grid.setRowCount(0)  # Limpa a grid antes de carregar novos registros
+    window.grid.setRowCount(0)
+    window.grid.setColumnCount(6)
+    window.grid.setHorizontalHeaderLabels(["Hora Inicial", "Hora Final", "Duração", "Atividade", "Ações", "Lançado"])
 
     if registros:
         window.grid.setRowCount(len(registros))
-        for row_idx, (id_registro, _, hora_inicio, hora_fim, atividade) in enumerate(registros):
-            duracao = calcular_duracao(hora_inicio, hora_fim)
+        for row_idx, (id_registro, _, hora_inicio, hora_fim, atividade, lancado) in enumerate(registros):
+            # ... (hora inicial, final, duração, atividade)
 
-            window.grid.setItem(row_idx, 0, QTableWidgetItem(hora_inicio))
-            window.grid.setItem(row_idx, 1, QTableWidgetItem(hora_fim))
-            window.grid.setItem(row_idx, 2, QTableWidgetItem(duracao))
-            window.grid.setItem(row_idx, 3, QTableWidgetItem(atividade))
+            for col_idx, value in enumerate([hora_inicio, hora_fim, calcular_duracao(hora_inicio, hora_fim), atividade]):
+                item = QTableWidgetItem(value)
+                window.grid.setItem(row_idx, col_idx, item)
 
+            # Botão de excluir
             delete_button = QPushButton("🗑️ Excluir")
-            delete_button.clicked.connect(lambda _, id_registro=id_registro: excluir_registro(window, id_registro))
+            delete_button.clicked.connect(lambda _, id=id_registro: excluir_registro(window, id))
             window.grid.setCellWidget(row_idx, 4, delete_button)
+
+            # Checkbox de Lançado
+            checkbox = QCheckBox()
+            checkbox.setChecked(bool(lancado))
+            checkbox.stateChanged.connect(lambda state, row=row_idx, id=id_registro: atualizar_lancado(window, row, id, state))
+            
+            checkbox = QCheckBox()
+            checkbox.setChecked(bool(lancado))
+            checkbox.stateChanged.connect(lambda state, row=row_idx, id=id_registro: atualizar_lancado(window, row, id, state))
+
+            checkbox.setStyleSheet(""" 
+                QCheckBox::indicator {
+                    width: 18px;
+                    height: 18px;
+                    border: 1px solid #aaa;
+                    background-color: #444;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #00cc66;
+                    border: 1px solid #00cc66;
+                }
+            """)
+
+            # Centralizar o checkbox com layout
+            checkbox_widget = QWidget()
+            layout = QHBoxLayout(checkbox_widget)
+            layout.addWidget(checkbox)
+            layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.setContentsMargins(0, 0, 0, 0)
+            checkbox_widget.setLayout(layout)
+
+            window.grid.setCellWidget(row_idx, 5, checkbox_widget)
+            
+            verificar_overlaps(window)
+
+
 
     # 🔹 Atualizar tempo total trabalhado do dia
     total_trabalho = calcular_tempo_total(registros)
@@ -126,12 +171,19 @@ def parar_cronometro(window):
 
         # ✅ Garantir que pegamos a hora correta do sistema local
         hora_inicio = (datetime.now().timestamp() - window.elapsed_time)
-        hora_inicio = datetime.fromtimestamp(hora_inicio).strftime("%H:%M")  # 🔹 Converte para hora correta
+        hora_inicio = datetime.fromtimestamp(hora_inicio).strftime("%H:%M")
 
-        hora_fim = datetime.now().strftime("%H:%M")  # 🔹 Captura a hora correta do término
+        hora_fim = datetime.now().strftime("%H:%M")
 
-        inserir_registro(hora_inicio, hora_fim, "Atividade registrada", window.data_filtro.date().toString("dd/MM/yy"))
-        carregar_grid(window)  # Atualiza a tabela
+        # ✅ Data real do sistema, ignorando o calendário
+        dia_hoje = datetime.now().strftime("%d/%m/%y")
+
+        inserir_registro(hora_inicio, hora_fim, "Atividade registrada", dia_hoje)
+
+        # 🔄 Atualizar grid somente se o usuário estiver no dia atual
+        if window.data_filtro.date().toString("dd/MM/yy") == dia_hoje:
+            carregar_grid(window)
+
         window.start_button.setEnabled(True)
         
 def atualizar_registro(window, row, col):
@@ -177,43 +229,227 @@ def atualizar_registro(window, row, col):
             total_trabalho = calcular_tempo_total(listar_registros(window.data_filtro.date().toString("dd/MM/yy")))
             window.total_trabalho_label.setText(f"Total Trabalhado: {total_trabalho}")
 
+            verificar_overlaps(window)
+            
             # 🔹 Reconectar itemChanged após a atualização
             window.grid.itemChanged.connect(lambda item: atualizar_registro(window, item.row(), item.column()))
 
+    
+
 
 def exportar_para_excel(window):
-    """Exporta os registros para um arquivo Excel, agrupados por dia."""
-
-    # 🔹 Obter intervalo de datas
     data_de = window.data_de_filtro.date().toString("dd/MM/yy")
     data_ate = window.data_ate_filtro.date().toString("dd/MM/yy")
-
-    # 🔹 Buscar registros no intervalo selecionado
     registros = listar_registros_intervalo(data_de, data_ate)
 
     if not registros:
         window.status_label.setText("⚠️ Nenhum registro encontrado no período selecionado.")
         return
 
-    # 🔹 Criar um DataFrame para exportação
-    df = pd.DataFrame(registros, columns=["ID", "Dia", "Hora Inicial", "Hora Final", "Atividade"])
-    df.drop(columns=["ID"], inplace=True)  # Remover a coluna ID
+    # Ajustar colunas para refletir o novo campo "Lançado"
+    df = pd.DataFrame(registros, columns=["ID", "Dia", "Hora Inicial", "Hora Final", "Atividade", "Lançado"])
+    df["Lançado"] = df["Lançado"].apply(lambda x: "Sim" if x else "Não")
 
-    # 🔹 Agrupar por dia e ordenar por hora inicial
-    df = df.sort_values(by=["Dia", "Hora Inicial"])
+    # Sugere nome padrão com base na data de hoje
+    hoje = datetime.now().strftime("%d-%m-%Y")
+    nome_sugerido = f"{hoje}_Timesheet.xlsx"
 
-    # 🔹 Criar um dicionário para estruturar os dados no Excel
-    dados_excel = {}
+    nome_arquivo, _ = QFileDialog.getSaveFileName(window, "Salvar Relatório em Excel", nome_sugerido, "Excel Files (*.xlsx)")
+    if not nome_arquivo:
+        return
+
+    try:
+        df.drop(columns=["ID"]).to_excel(nome_arquivo, index=False, sheet_name="Relatório")
+        window.status_label.setText(f"✅ Excel gerado com sucesso: {nome_arquivo}")
+
+        # Abrir automaticamente após exportar
+        if platform.system() == "Windows":
+            os.startfile(nome_arquivo)
+        elif platform.system() == "Darwin":
+            subprocess.call(["open", nome_arquivo])
+        else:
+            subprocess.call(["xdg-open", nome_arquivo])
+    except Exception as e:
+        window.status_label.setText("❌ Erro ao gerar o Excel.")
+        
+def atualizar_lancado(window, row, id_registro, state):
+    """Atualiza o campo 'lancado' no banco e ajusta o estilo visual."""
+    valor = 1 if state == 2 else 0  # Qt.Checked == 2
+    atualizar_registro_no_bd(id_registro, "lancado", valor)
+
+    # Estiliza apenas a célula do checkbox (coluna 5)
+    cell_widget = window.grid.cellWidget(row, 5)
+    if cell_widget:
+        if valor:
+            cell_widget.setStyleSheet("background-color: rgba(0, 255, 0, 50); border-radius: 4px;")
+        else:
+            cell_widget.setStyleSheet("background-color: transparent;")
+  
+ # Exportação para PDF           
+def exportar_para_pdf(window):
+    data_de = window.data_de_filtro.date().toString("dd/MM/yy")
+    data_ate = window.data_ate_filtro.date().toString("dd/MM/yy")
+    registros = listar_registros_intervalo(data_de, data_ate)
+
+    if not registros:
+        window.status_label.setText("⚠️ Nenhum registro encontrado no período selecionado.")
+        return
+
+    df = pd.DataFrame(registros, columns=["ID", "Dia", "Hora Inicial", "Hora Final", "Atividade", "Lançado"])
+    df.drop(columns=["ID"], inplace=True)
+    df["Lançado"] = df["Lançado"].apply(lambda x: "Sim" if x else "Não")
+
+    hoje = datetime.now().strftime("%d-%m-%Y")
+    nome_sugerido = f"{hoje}_Timesheet.pdf"
+    nome_arquivo, _ = QFileDialog.getSaveFileName(window, "Salvar Relatório em PDF", nome_sugerido, "PDF Files (*.pdf)")
+    if not nome_arquivo:
+        return
+
+    doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    story = []
+    styles = getSampleStyleSheet()
+
+    # Fonte menor e minimalista
+    normal_style = ParagraphStyle(name='NormalSmall', fontSize=9, leading=11)
+    heading_style = ParagraphStyle(name='Heading', fontSize=11, leading=14, spaceAfter=6, fontName='Helvetica-Bold')
+
+    # Título principal
+    story.append(Paragraph("Relatório de Atividades - Timesheet", styles["Title"]))
+    story.append(Spacer(1, 12))
+
     for dia, grupo in df.groupby("Dia"):
-        nome_aba = dia.replace("/", "_")  # 🔹 Substituir "/" por "_"
-        dados_excel[nome_aba] = grupo.drop(columns=["Dia"])  # Remove a coluna 'Dia' para evitar repetição
+        story.append(Paragraph(f"DIA: {dia}", heading_style))
+        story.append(Paragraph("Lançamentos:", normal_style))
+        story.append(Spacer(1, 4))
 
-    # 🔹 Criar um arquivo Excel
-    nome_arquivo, _ = QFileDialog.getSaveFileName(window, "Salvar Relatório", "", "Excel Files (*.xlsx)")
-    
-    if nome_arquivo:
-        with pd.ExcelWriter(nome_arquivo, engine="openpyxl") as writer:
-            for dia, dados in dados_excel.items():
-                dados.to_excel(writer, sheet_name=dia, index=False)  # Agora o nome da aba está correto!
+        data = [["Hora Inicial", "Hora Final", "Duração", "Atividade", "Lançado"]]
 
-        window.status_label.setText(f"✅ Relatório exportado para {nome_arquivo}")
+        total_segundos = 0
+        for _, row in grupo.iterrows():
+            hi, hf = row["Hora Inicial"], row["Hora Final"]
+            try:
+                h_ini = datetime.strptime(hi, "%H:%M")
+                h_fim = datetime.strptime(hf, "%H:%M")
+                duracao = h_fim - h_ini
+                segundos = duracao.total_seconds()
+                total_segundos += segundos
+                horas = int(segundos // 3600)
+                minutos = int((segundos % 3600) // 60)
+                dur = f"{horas}h {minutos}m"
+            except:
+                dur = "--"
+
+            data.append([hi, hf, dur, row["Atividade"], row["Lançado"]])
+
+        # Colunas otimizadas
+        tabela = Table(data, colWidths=[2.3*cm, 2.3*cm, 2.6*cm, 8.3*cm, 2*cm])
+        tabela.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f2f2f2")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),                # Fonte padrão
+            ("FONTSIZE", (3, 1), (3, -1), 7),                 # Fonte menor para a coluna Atividade
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+            ("TOPPADDING", (0, 1), (-1, -1), 4),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9f9f9")]),
+            ("WORDWRAP", (3, 1), (3, -1), True),  # Atividade
+        ]))
+
+        story.append(tabela)
+        story.append(Spacer(1, 6))
+
+        total_horas = int(total_segundos // 3600)
+        total_minutos = int((total_segundos % 3600) // 60)
+        story.append(Paragraph(f"Tempo Trabalhado: {total_horas}h {total_minutos}m", normal_style))
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("<hr width='100%'/>", styles["Normal"]))
+        story.append(Spacer(1, 8))
+
+    doc.build(story)
+    window.status_label.setText(f"✅ PDF gerado com sucesso: {nome_arquivo}")
+
+    # Abrir o PDF automaticamente
+    try:
+        if platform.system() == "Windows":
+            os.startfile(nome_arquivo)
+        elif platform.system() == "Darwin":
+            subprocess.call(["open", nome_arquivo])
+        else:
+            subprocess.call(["xdg-open", nome_arquivo])
+    except:
+        window.status_label.setText("PDF salvo, mas não foi possível abrir automaticamente.")
+        
+# Funcoes para detectar overlaps
+def horario_para_minutos(hora_str):
+    try:
+        h, m = map(int, hora_str.split(":"))
+        return h * 60 + m
+    except:
+        return None
+
+from PyQt6 import QtGui
+from PyQt6.QtWidgets import QCheckBox
+
+def horario_para_minutos(hora_str):
+    try:
+        h, m = map(int, hora_str.split(":"))
+        return h * 60 + m
+    except:
+        return None
+
+def verificar_overlaps(window):
+    registros = []
+    tem_overlap = False  # ✅ Flag para exibir mensagem
+
+    # 🔁 Coleta os horários da grid
+    for i in range(window.grid.rowCount()):
+        hi_item = window.grid.item(i, 0)
+        hf_item = window.grid.item(i, 1)
+
+        if hi_item and hf_item:
+            inicio = horario_para_minutos(hi_item.text())
+            fim = horario_para_minutos(hf_item.text())
+
+            if inicio is not None and fim is not None and fim > inicio:
+                registros.append((inicio, fim, i))
+
+    # 🔁 Resetar cores de Hora Inicial e Hora Final (colunas 0 e 1)
+    for i in range(window.grid.rowCount()):
+        for col in [0, 1]:
+            item = window.grid.item(i, col)
+            if item:
+                checkbox_widget = window.grid.cellWidget(i, 5)
+                if isinstance(checkbox_widget, QCheckBox) and checkbox_widget.isChecked():
+                    cor = QtGui.QColor("red")
+                else:
+                    cor = QtGui.QColor("white")
+                item.setForeground(QtGui.QBrush(cor))
+
+    # 🔍 Verificar conflitos de horário e pintar de vermelho se houver
+    for i, (ini1, fim1, row1) in enumerate(registros):
+        for j, (ini2, fim2, row2) in enumerate(registros):
+            if i != j and ini1 < fim2 and ini2 < fim1:
+                tem_overlap = True  # ✅ Marcar que há conflito
+                for col in [0, 1]:  # Hora Inicial e Final
+                    item1 = window.grid.item(row1, col)
+                    item2 = window.grid.item(row2, col)
+                    if item1:
+                        item1.setForeground(QtGui.QBrush(QtGui.QColor("red")))
+                    if item2:
+                        item2.setForeground(QtGui.QBrush(QtGui.QColor("red")))
+
+    # ✅ Exibir ou limpar mensagem no status_label
+    if tem_overlap:
+        window.status_label.setStyleSheet("color: red;")
+        window.status_label.setText("⚠️ Overlap detectado entre horários.")
+    else:
+        window.status_label.setText("")
+
+
+
+
+
+
