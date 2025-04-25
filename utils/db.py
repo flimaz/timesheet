@@ -1,15 +1,20 @@
 import sqlite3
 from datetime import datetime
 
-DB_NAME = "timesheet.db"
+from utils.config import carregar_caminho_bd
 
 # 🔹 Conectar ao banco de dados
-def conectar():
-    return sqlite3.connect(DB_NAME, check_same_thread=False)
+def conectar(caminho=None):
+    if not caminho:
+        caminho = carregar_caminho_bd()
+    if not caminho:
+        raise ValueError("Caminho do banco de dados não definido.")
+    return sqlite3.connect(caminho, check_same_thread=False)
+
 
 # 🔹 Criar a tabela corretamente com ID automático
-def criar_tabela():
-    conn = conectar()
+def criar_tabela(caminho=None):
+    conn = conectar(caminho)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS registros (
@@ -23,6 +28,7 @@ def criar_tabela():
     ''')
     conn.commit()
     conn.close()
+
 
 # 🔹 Criar um novo registro (ID gerado automaticamente)
 def inserir_registro(hora_inicio, hora_fim, atividade, dia=None):
@@ -81,7 +87,7 @@ def excluir_registro(id_registro):
    
 def atualizar_registro_no_bd(id_registro, campo, novo_valor):
     """Atualiza um campo específico de um registro no banco de dados."""
-    conexao = sqlite3.connect("timesheet.db")
+    conexao = conectar()
     cursor = conexao.cursor()
 
     query = f"UPDATE registros SET {campo} = ? WHERE id = ?"
@@ -91,24 +97,31 @@ def atualizar_registro_no_bd(id_registro, campo, novo_valor):
     conexao.close()
     
 def listar_registros_intervalo(data_de, data_ate):
-    """Retorna os registros dentro de um intervalo de datas."""
-    conexao = sqlite3.connect("timesheet.db")
-    cursor = conexao.cursor()
+    # Converter dd/MM/yy → yy-MM-dd para comparação correta
+    def converter(data_str):
+        dia, mes, ano = data_str.split("/")
+        return f"{ano}-{mes}-{dia}"
+
+    data_de_sql = converter(data_de)
+    data_ate_sql = converter(data_ate)
+
+    conn = conectar()
+    cursor = conn.cursor()
 
     query = """
     SELECT id, dia, hora_inicio, hora_fim, atividade, lancado
     FROM registros 
-    WHERE dia BETWEEN ? AND ?
-    ORDER BY dia, hora_inicio
+    WHERE substr(dia, 7, 2) || '-' || substr(dia, 4, 2) || '-' || substr(dia, 1, 2)
+          BETWEEN ? AND ?
+    ORDER BY substr(dia, 7, 2) || '-' || substr(dia, 4, 2) || '-' || substr(dia, 1, 2),
+             hora_inicio
     """
-    
-    cursor.execute(query, (data_de, data_ate))
+
+    cursor.execute(query, (data_de_sql, data_ate_sql))
     registros = cursor.fetchall()
 
-    conexao.close()
+    conn.close()
     return registros
 
 
-# Criar a tabela ao iniciar
-criar_tabela()
 

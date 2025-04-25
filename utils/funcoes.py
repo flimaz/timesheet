@@ -1,9 +1,9 @@
 from datetime import datetime
 from PyQt6.QtGui import QPalette, QColor
-from PyQt6.QtWidgets import QPushButton, QTableWidgetItem, QFileDialog, QCheckBox, QWidget, QHBoxLayout
+from PyQt6.QtWidgets import QPushButton, QTableWidgetItem, QFileDialog, QCheckBox, QWidget, QHBoxLayout, QMessageBox
 import time
-from PyQt6.QtCore import QTime, Qt
-from utils.db import inserir_registro, excluir_registro as excluir_do_banco, listar_registros, atualizar_registro_no_bd, listar_registros_intervalo 
+from PyQt6.QtCore import QTime, Qt, QTimer
+from utils.db import inserir_registro, excluir_registro as excluir_do_banco, listar_registros, atualizar_registro_no_bd, listar_registros_intervalo
 import pandas as pd
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -14,6 +14,8 @@ import os
 import platform
 import subprocess
 from PyQt6 import QtGui
+from utils.config import carregar_ultimo_diretorio_exportacao, salvar_ultimo_diretorio_exportacao, carregar_caminho_bd
+import shutil
 
 def aplicar_tema_escuro(app):
     """Aplica um tema escuro minimalista usando Fusion."""
@@ -77,6 +79,10 @@ def carregar_grid(window):
 
             for col_idx, value in enumerate([hora_inicio, hora_fim, calcular_duracao(hora_inicio, hora_fim), atividade]):
                 item = QTableWidgetItem(value)
+                
+                if col_idx == 2:
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                
                 window.grid.setItem(row_idx, col_idx, item)
 
             # Botão de excluir
@@ -125,7 +131,6 @@ def carregar_grid(window):
     window.total_trabalho_label.setText(f"Total Trabalhado: {total_trabalho}")
 
 def adicionar_registro(window):
-    """Adiciona um novo registro manualmente na grid e no banco."""
     hora_inicio = window.hora_inicio_input.time().toString("HH:mm")
     hora_fim = window.hora_fim_input.time().toString("HH:mm")
     atividade = window.atividade_input.text().strip()
@@ -133,13 +138,22 @@ def adicionar_registro(window):
 
     if atividade:
         inserir_registro(hora_inicio, hora_fim, atividade, dia_filtro)
+
+        # Resetar campos
         window.hora_inicio_input.setTime(QTime.currentTime())
         window.hora_fim_input.setTime(QTime.currentTime().addSecs(3600))
         window.atividade_input.clear()
+
+        # ✅ Remover a borda vermelha (volta ao normal)
+        window.atividade_input.setStyleSheet("color: white;")
+
         carregar_grid(window)
     else:
-        if hasattr(window, "timer_label"):  # 🔹 Corrigindo erro de referência inexistente
-            window.timer_label.setText("⚠️ Preencha a descrição da atividade!")
+        # ⚠️ Atividade vazia → mostra borda vermelha
+        window.atividade_input.setStyleSheet("""
+            border: 2px solid red;
+            color: white;
+        """)
 
 def excluir_registro(window, id_registro):
     """Exclui um registro do banco de dados e atualiza a grid."""
@@ -234,9 +248,6 @@ def atualizar_registro(window, row, col):
             # 🔹 Reconectar itemChanged após a atualização
             window.grid.itemChanged.connect(lambda item: atualizar_registro(window, item.row(), item.column()))
 
-    
-
-
 def exportar_para_excel(window):
     data_de = window.data_de_filtro.date().toString("dd/MM/yy")
     data_ate = window.data_ate_filtro.date().toString("dd/MM/yy")
@@ -246,21 +257,28 @@ def exportar_para_excel(window):
         window.status_label.setText("⚠️ Nenhum registro encontrado no período selecionado.")
         return
 
-    # Ajustar colunas para refletir o novo campo "Lançado"
     df = pd.DataFrame(registros, columns=["ID", "Dia", "Hora Inicial", "Hora Final", "Atividade", "Lançado"])
     df["Lançado"] = df["Lançado"].apply(lambda x: "Sim" if x else "Não")
 
-    # Sugere nome padrão com base na data de hoje
     hoje = datetime.now().strftime("%d-%m-%Y")
     nome_sugerido = f"{hoje}_Timesheet.xlsx"
 
-    nome_arquivo, _ = QFileDialog.getSaveFileName(window, "Salvar Relatório em Excel", nome_sugerido, "Excel Files (*.xlsx)")
+    # 📂 Pega último diretório salvo
+    ultimo_dir = carregar_ultimo_diretorio_exportacao()
+    nome_arquivo, _ = QFileDialog.getSaveFileName(window, "Salvar Relatório em Excel",
+        os.path.join(ultimo_dir, nome_sugerido), "Excel Files (*.xlsx)")
+
     if not nome_arquivo:
         return
+
+    # 📂 Salva novo diretório escolhido
+    salvar_ultimo_diretorio_exportacao(nome_arquivo)
 
     try:
         df.drop(columns=["ID"]).to_excel(nome_arquivo, index=False, sheet_name="Relatório")
         window.status_label.setText(f"✅ Excel gerado com sucesso: {nome_arquivo}")
+        QTimer.singleShot(5000, lambda: window.status_label.setText(""))
+
 
         # Abrir automaticamente após exportar
         if platform.system() == "Windows":
@@ -271,6 +289,8 @@ def exportar_para_excel(window):
             subprocess.call(["xdg-open", nome_arquivo])
     except Exception as e:
         window.status_label.setText("❌ Erro ao gerar o Excel.")
+        QTimer.singleShot(5000, lambda: window.status_label.setText(""))
+
         
 def atualizar_lancado(window, row, id_registro, state):
     """Atualiza o campo 'lancado' no banco e ajusta o estilo visual."""
@@ -301,9 +321,17 @@ def exportar_para_pdf(window):
 
     hoje = datetime.now().strftime("%d-%m-%Y")
     nome_sugerido = f"{hoje}_Timesheet.pdf"
-    nome_arquivo, _ = QFileDialog.getSaveFileName(window, "Salvar Relatório em PDF", nome_sugerido, "PDF Files (*.pdf)")
+
+    # 📂 Pega último diretório salvo
+    ultimo_dir = carregar_ultimo_diretorio_exportacao()
+    nome_arquivo, _ = QFileDialog.getSaveFileName(window, "Salvar Relatório em PDF",
+        os.path.join(ultimo_dir, nome_sugerido), "PDF Files (*.pdf)")
+
     if not nome_arquivo:
         return
+
+    # 📂 Salva novo diretório escolhido
+    salvar_ultimo_diretorio_exportacao(nome_arquivo)
 
     doc = SimpleDocTemplate(nome_arquivo, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     story = []
@@ -367,20 +395,28 @@ def exportar_para_pdf(window):
         story.append(Spacer(1, 10))
         story.append(Paragraph("<hr width='100%'/>", styles["Normal"]))
         story.append(Spacer(1, 8))
+        
+        try:
+            doc.build(story)
+            window.status_label.setText(f"✅ PDF gerado com sucesso: {nome_arquivo}")
+            QTimer.singleShot(5000, lambda: window.status_label.setText(""))
 
-    doc.build(story)
-    window.status_label.setText(f"✅ PDF gerado com sucesso: {nome_arquivo}")
+            # Tenta abrir automaticamente, mas sem alertar se der erro
+            try:
+                if platform.system() == "Windows":
+                    os.startfile(nome_arquivo)
+                elif platform.system() == "Darwin":
+                    subprocess.call(["open", nome_arquivo])
+                else:
+                    subprocess.call(["xdg-open", nome_arquivo])
+            except:
+                pass  # Não exibe erro secundário
+        except Exception as e:
+            QMessageBox.critical(window, "Erro ao salvar PDF",
+                f"❌ Não foi possível salvar o arquivo.\n\nMotivo: {str(e)}\n\n"
+                "Verifique se o arquivo está aberto em outro programa e tente novamente.")
 
-    # Abrir o PDF automaticamente
-    try:
-        if platform.system() == "Windows":
-            os.startfile(nome_arquivo)
-        elif platform.system() == "Darwin":
-            subprocess.call(["open", nome_arquivo])
-        else:
-            subprocess.call(["xdg-open", nome_arquivo])
-    except:
-        window.status_label.setText("PDF salvo, mas não foi possível abrir automaticamente.")
+
         
 # Funcoes para detectar overlaps
 def horario_para_minutos(hora_str):
@@ -402,7 +438,7 @@ def horario_para_minutos(hora_str):
 
 def verificar_overlaps(window):
     registros = []
-    tem_overlap = False  # ✅ Flag para exibir mensagem
+    tem_overlap = False  
 
     # 🔁 Coleta os horários da grid
     for i in range(window.grid.rowCount()):
@@ -448,6 +484,36 @@ def verificar_overlaps(window):
     else:
         window.status_label.setText("")
 
+
+def mostrar_sobre(self):
+    QMessageBox.information(
+        self,
+        "Sobre o Aplicativo",
+        "📘 Timesheet Tracker\n\n"
+        "Versão: 1.0.0\n"
+        "Desenvolvido por: Luiz Lima\n\n"
+        "Aplicação para controle de atividades diárias.\n"
+        "© 2025 Luiz Lima. Todos os direitos reservados."
+    )
+
+def fazer_backup_banco(window):
+    caminho_origem = carregar_caminho_bd()
+    if not caminho_origem or not os.path.exists(caminho_origem):
+        QMessageBox.warning(window, "Backup", "Banco de dados não encontrado.")
+        return
+
+    sugestao_nome = "backup_timesheet.db"
+    destino, _ = QFileDialog.getSaveFileName(window, "Salvar Backup do Banco",
+        sugestao_nome, "SQLite Database (*.db)")
+
+    if not destino:
+        return
+
+    try:
+        shutil.copy2(caminho_origem, destino)
+        QMessageBox.information(window, "Backup", f"✅ Backup criado com sucesso:\n{destino}")
+    except Exception as e:
+        QMessageBox.critical(window, "Erro", f"❌ Erro ao criar backup:\n{str(e)}")
 
 
 
