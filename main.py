@@ -2,18 +2,19 @@
 from utils.config import carregar_caminho_bd, salvar_caminho_bd
 from PyQt6.QtWidgets import QFileDialog
 import sys
+import os
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QTableWidget, 
-    QHeaderView, QHBoxLayout, QDateEdit, QTimeEdit, QLineEdit, QSizePolicy, QMessageBox, QFrame
+    QHeaderView, QHBoxLayout, QDateEdit, QTimeEdit, QLineEdit, QSizePolicy, QMessageBox, QFrame, QMainWindow
 )
 from PyQt6.QtCore import QTimer, QDate, QSize
 from PyQt6.QtGui import QFont, QIcon
 from utils.funcoes import (
     aplicar_tema_escuro, carregar_grid, adicionar_registro,
-    iniciar_cronometro, parar_cronometro, atualizar_tempo, atualizar_registro, exportar_para_excel, exportar_para_pdf, mostrar_sobre, fazer_backup_banco
+    iniciar_cronometro, parar_cronometro, atualizar_tempo, atualizar_registro, exportar_para_excel, exportar_para_pdf, mostrar_sobre, fazer_backup_banco, resource_path
 )
 
-class TimesheetApp(QWidget):
+class TimesheetApp(QMainWindow):
     
     def closeEvent(self, event):
         reply = QMessageBox.question(
@@ -33,7 +34,8 @@ class TimesheetApp(QWidget):
         super().__init__()
 
         # Definir Ícone do Aplicativo
-        self.setWindowIcon(QIcon("assets/TS.ico"))  # Caminho para o ícone
+        icone_path = resource_path('assets/TS.ico')
+        self.setWindowIcon(QIcon(icone_path))
 
         self.setWindowTitle("Timesheet Tracker")
         self.setGeometry(200, 200, 900, 600)
@@ -67,7 +69,7 @@ class TimesheetApp(QWidget):
         self.total_trabalho_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         self.layout.addWidget(self.total_trabalho_label)
 
-        # 🔹 Layout horizontal para calendário e botões
+        #  Layout horizontal para calendário e botões
         calendario_layout = QHBoxLayout()
 
         self.data_filtro = QDateEdit()
@@ -76,31 +78,31 @@ class TimesheetApp(QWidget):
         self.data_filtro.dateChanged.connect(lambda: carregar_grid(self))
         calendario_layout.addWidget(self.data_filtro)
 
-        # 🔧 Estilo comum para botões pequenos
+        # Estilo comum para botões pequenos
         def configurar_botao(botao):
             botao.setFixedSize(QSize(30, 30))
             botao.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             botao.setStyleSheet("font-size: 12px; padding: 2px;")
 
-        # 🔘 Botão ⬅️ Voltar 1 dia
+        # Voltar 1 dia
         btn_voltar = QPushButton("←")
         btn_voltar.clicked.connect(lambda: self.data_filtro.setDate(self.data_filtro.date().addDays(-1)))
         configurar_botao(btn_voltar)
         calendario_layout.addWidget(btn_voltar)
 
-        # 🔘 Botão ➡️ Avançar 1 dia
+        # Avançar 1 dia
         btn_avancar = QPushButton("→")
         btn_avancar.clicked.connect(lambda: self.data_filtro.setDate(self.data_filtro.date().addDays(1)))
         configurar_botao(btn_avancar)
         calendario_layout.addWidget(btn_avancar)
 
-        # 🔘 Botão 📅 Hoje
+        # Botão Hoje
         btn_hoje = QPushButton("📅")
         btn_hoje.clicked.connect(lambda: self.data_filtro.setDate(QDate.currentDate()))
         configurar_botao(btn_hoje)
         calendario_layout.addWidget(btn_hoje)
 
-        # 🔹 Adiciona o layout no layout principal
+        #  Adiciona o layout no layout principal
         self.layout.addLayout(calendario_layout)
 
         # Grid de Registros
@@ -147,7 +149,7 @@ class TimesheetApp(QWidget):
         self.layout.addLayout(form_layout)
         
         
-        # 🔹 Linha de divisão antes dos filtros de data
+        #  Linha de divisão antes dos filtros de data
         linha_divisoria = QFrame()
         linha_divisoria.setFrameShape(QFrame.Shape.HLine)
         linha_divisoria.setFrameShadow(QFrame.Shadow.Sunken)
@@ -160,7 +162,7 @@ class TimesheetApp(QWidget):
         self.status_label = QLabel("")
         self.layout.addWidget(self.status_label)
 
-        carregar_grid(self)  # 🔹 Carregar registros ao iniciar a aplicação
+        carregar_grid(self)  # Carregar registros ao iniciar a aplicação
 
         # Layout para os campos de data
         export_layout = QHBoxLayout()
@@ -176,9 +178,9 @@ class TimesheetApp(QWidget):
         export_layout.addWidget(QLabel("Até:"))
         export_layout.addWidget(self.data_ate_filtro)
 
-        self.layout.addLayout(export_layout)  # 🔹 Adiciona os filtros abaixo da GRID
+        self.layout.addLayout(export_layout)  #  Adiciona os filtros abaixo da GRID
 
-        # 🔹 Layout horizontal para botões de exportação
+        # Layout horizontal para botões de exportação
         export_buttons_layout = QHBoxLayout()
 
         self.export_button = QPushButton("📤 Exportar para Excel")
@@ -193,7 +195,7 @@ class TimesheetApp(QWidget):
         self.layout.addLayout(export_buttons_layout)
 
 
-        # 🔹 Layout horizontal para botões inferiores
+        # Layout horizontal para botões inferiores
         rodape_layout = QHBoxLayout()
 
         self.backup_button = QPushButton("🗂️ Backup BD")
@@ -206,12 +208,9 @@ class TimesheetApp(QWidget):
 
         self.layout.addLayout(rodape_layout)
 
-        self.setLayout(self.layout)
-        
-                
-
-
-
+        container = QWidget()
+        container.setLayout(self.layout)
+        self.setCentralWidget(container)        
 
 def verificar_banco_dados():
     caminho_salvo = carregar_caminho_bd()
@@ -245,6 +244,9 @@ def verificar_banco_dados():
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    
+    icone_path = resource_path('assets/TS.ico')
+    app.setWindowIcon(QIcon(icone_path))
 
     try:
         caminho_bd = verificar_banco_dados()

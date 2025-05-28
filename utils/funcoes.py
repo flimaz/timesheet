@@ -16,6 +16,7 @@ import subprocess
 from PyQt6 import QtGui
 from utils.config import carregar_ultimo_diretorio_exportacao, salvar_ultimo_diretorio_exportacao, carregar_caminho_bd
 import shutil
+import sys
 
 def aplicar_tema_escuro(app):
     """Aplica um tema escuro minimalista usando Fusion."""
@@ -514,6 +515,16 @@ def fazer_backup_banco(window):
         QMessageBox.information(window, "Backup", f"✅ Backup criado com sucesso:\n{destino}")
     except Exception as e:
         QMessageBox.critical(window, "Erro", f"❌ Erro ao criar backup:\n{str(e)}")
+        
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 
 
 
